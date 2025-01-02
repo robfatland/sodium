@@ -1,5 +1,8 @@
 import random as rand
 from random import randint, choice
+from math import fabs, sqrt
+import numpy as np, matplotlib.pyplot as plt, sys
+
 
 ####
 ####
@@ -22,17 +25,23 @@ def padnum(n, w):
 ####
 ####
 
-def R_n_zero(n, x):
-    '''returns a zero-sum ring with most values between -x and x inclusive'''
-    p = [randint(-x, x) for i in range(n-1)]
-    p.append(-sum(p))
-    return p
 
-def R_n(n, x):
-    '''returns a 1-sum ring with most or all values between -x and x inclusive'''
+def R_n_rough(n, x):
+    '''returns a 1-sum ring with most if not all values between -x and x inclusive'''
     p = [randint(-x, x) for i in range(n-1)]
     p.append(1 - sum(p))
     return p
+
+
+def R_n(n, x):
+    '''builds and returns a random ring: all values on [-x, x], sum = 1'''
+    tries = 0
+    while True:
+        p = [randint(-x, x) for i in range(n)]
+        if sum(p) == 1: return p
+        tries += 1
+        if tries > 1000000: break
+    return []
 
 def kJustify(k, n):
     '''ensure site index k is on [0, n-1]'''
@@ -53,8 +62,18 @@ def kInc(k, n):
     return kpo
 
 def Distance(a, b, n):
-    '''shorter of two distances between site indices a and b for ring n'''
+    '''return positive-valued shortest distances between sites a and b in ring Rn'''
     return min(abs(a - b), abs((a + n) - b), abs((a - n) - b))
+
+def D(n, a, b):
+    '''return compound distance between sites a and b in ring of size n'''
+    if a < 0 or b < 0 or a >= n or b >= n or a == b: return 0
+    if b > a: return (b - a)*(b - a - n)
+    return (a - b)*(a - b - n) 
+
+def CompoundDistance(n, a, b):
+    '''return compound distance between sites a and b in ring of size n'''
+    return D(n, a, b)
 
 def NegList(R):
     '''for R: return count of negative-valued sites and a list of their indices'''
@@ -91,17 +110,19 @@ def IsQuiescent(R):
     return True
 
 def Q(R):
-    '''for R: all values non-negative? (generalized quiescence)'''
+    '''bool is R quiescent, i.e. all values non-negative? (generalized quiescence)'''
     for i in range(len(R)):
         if R[i] < 0: return False
     return True
 
+
 def Entropy(R):
-    '''for R: return a predicted flip sum to reach Q'''
+    '''return entropy(R) aka flip sum aka entropy cost function, a double sum over site pairs: a * b * D(a, b)'''
     n, E = len(R), 0
     for i in range(n-1):
         for j in range(i+1, n): E += R[i]*R[j]*(j-i)*(j-i-n)
     return E
+
 
 def Entropy2(R):
     """
@@ -120,6 +141,9 @@ def RQ(R, verbose=False):
     while not IsQuiescent(R):                                # Given R this while drives it to Q
         if verbose: print(Entropy(R), R)       
         nn, nl  = NegList(R)                                 # number and list of negative sites
+        if nn < 1: 
+            print('RQ() zero negative sites fail condition: ' + str(R))
+            
         R, v    = Flip(R, nl[rand.randint(0, nn-1)])         # flip randomly; return 
                                                              #   tuple = new R + 2 x abs(negative site) 
         fc     += 1                                          # update flip count
@@ -218,6 +242,78 @@ def GenerateAllPossibleRings(m, n):
         R = IncrementR(R, m, 0)                   # Always attempt the odometer increase of R at site 0
         if not R: return L                        #    returns False when no more increments are possible
 
+
+######
+######
+#
+# Cost functions
+#
+######
+######
+
+
+def CCost(R, delta):
+    cost = 0
+    n = len(R)
+    for i in range(n):
+        a = R[i]
+        ip2 = i + delta
+        while ip2 >= n: ip2 -= n
+        b = R[ip2]
+        cost += (a-b)**2
+    return cost
+
+
+def AbsCost(R, delta):
+    '''Returns a cost value for a ring using an ad hoc absolute value scheme'''
+    cost = 0
+    n = len(R)
+    for i in range(n):
+        a = R[i]
+        ip2 = i + delta
+        while ip2 >= n: ip2 -= n
+        b = R[ip2]
+        cost += fabs(a-b)
+    return cost    
+
+def ECost(R): 
+    '''Cost function is the Entropy() function'''
+    return Entropy(R)
+
+
+def AllHorseCollarsCost(R):
+    '''Cost function for R: sum over all sites i of abs(sum(all-but-i-sites))'''
+    n = len(R)
+    total_sum = 0
+    for i in range(n):
+        this_sum = 0
+        for j in range(i, i + n - 1):
+            j = kJustify(j, n)
+            this_sum += R[j]
+        total_sum += fabs(this_sum)
+    return total_sum
+
+
+def OneHorseCollarCost(R, a):
+    '''Cost function for R: Return sum of all sites except site a'''
+    n = len(R)
+    this_sum = 0
+    for b in range(a + 1, a + 1 + n - 1):
+        b = kJustify(b, n)
+        this_sum += R[b]
+    return this_sum
+
+def ScholesCost(R):
+    n = len(R)
+    cost = 0
+    for i in range(n):
+        for j in range(n-1):
+            this_sum = 0
+            for k in range(i, i + j + 1):
+                this_sum += R[kJustify(k, n)]
+            cost += fabs(this_sum)
+    return cost
+
 ####
 ####
 #
@@ -260,4 +356,103 @@ def PrintPossible(m_max, n):
     for m in range(1, m_max + 1):
         p = GenerateAllPossibleRings(m, n)
         print('       constraint ' + str(m) + ' yields ' + str(len(p)) + ' possible rings')
+
+
+def ChartIMO1986_3_solution_cost(n, x):
+    '''For a ring of size n with max site value x: Chart to olympiad solution cost function'''
+    R = R_n(n, x)
+    c = []
+    while not IsQuiescent(R):
+        c.append(CCost(R, 2))
+        nn, nl  = NegList(R)                                 # the number and list of negative sites
+        R, v    = Flip(R, nl[rand.randint(0, nn-1)])         # execute a flip at a random negative site
+    fig,ax=plt.subplots(figsize=(6,4))
+    ax.plot(c)
+    ax.set(title='Ring cost function with flips: Olympiad solution')
+
+
+def CompareEntropyFormulaToEmpirical(n1, n2, n_trials, x):
+    '''Run a few k trials comparing the entropy formula to actual entropy E(R -> Q) where R is randomly generated'''
+    print()
+    for n in range(n1, n2 + 1):
+        noConflict = True
+        for j in range(n_trials):
+            R = R_n(n, x)
+            E = Entropy(R)
+            fc, Ecalc = RQ(R)
+            if not E == Ecalc:
+                print('    mismatch: ' + str(n) + ' with Rn = ' + str(R))
+                noConflict = False
+        if noConflict: print('n = ' + str(n) + '   ...all tests agree with the entropy cost function')
+    return
+
+
+def ChartEntropyCostFunction(n, x):
+    '''For a ring of size n with max site value x: Chart to olympiad solution cost function'''
+    R = R_n(n, x)
+    c = []
+    while not IsQuiescent(R):
+        c.append(ECost(R))
+        nn, nl  = NegList(R)                                 # the number and list of negative sites
+        R, v    = Flip(R, nl[rand.randint(0, nn-1)])         # execute a flip at a random negative site
+    fig,ax=plt.subplots(figsize=(6,4))
+    ax.plot(c)
+    ax.set(title='Ring entropy (cost function) with flips')
+
+
+def ChartsToInvestigateHorseCollarCostFunctions(n, x):
+    '''Compares horse collar cost function ideas'''
+    R = R_n(n, x)
+    c, d = [], []
+    while True:
+        nn, nl  = NegList(R)
+        negsite = rand.randint(0, nn - 1)
+        c.append(AllHorseCollarsCost(R))
+        d.append(OneHorseCollarCost(R, nl[negsite]))
+        R, v    = Flip(R, nl[negsite])
+        c.append(AllHorseCollarsCost(R))
+        d.append(OneHorseCollarCost(R, nl[negsite]))
+        if IsQuiescent(R): break
+    
+    fig,ax=plt.subplots(figsize=(6,4))
+    ax.plot(c)
+    ax.set(title='All horse collars')
+    
+    fig,ax=plt.subplots(figsize=(6,4))
+    ax.plot(d)
+    ax.set(title='One horse collar')     
+
+    
+def ChartScholesCostFunction(n, x):
+    '''Chart of the Scholes cost function over flips'''
+    R = R_n(n, x)
+    c = [ScholesCost(R)]
+    while True:
+        nn, nl  = NegList(R)
+        negsite = rand.randint(0, nn - 1)
+        R, v    = Flip(R, nl[negsite])
+        this_cost = ScholesCost(R)
+        c.append(this_cost)
+        nn, nl  = NegList(R)
+        if nn == 0: break
+    fig,ax=plt.subplots(figsize=(6,4))
+    ax.plot(c)
+    ax.set(title='Scholes Cost Function')
+    ax.set_xlabel('successive flips')
+    ax.set_ylabel('A(R)')
+    print(R)
+   
+def PrintScholesDeltaTable(spacer, min_a1, max_S):
+    print()
+    print("Scholes cost function (generalized) produces this table of A(R') - A(R) values")
+    print()
+    msg = ' ' + 'S         a1:  -1'
+    spacer, min_a1, max_S = 8, -12, 12
+    for a1 in range(-2, min_a1 -1, -1): msg += padnum(a1, spacer)
+    print(msg)
+    for S in range(1, max_S + 1):
+        msg = padnum(S, 2) + ' '*8
+        for a1 in range(-1, min_a1 - 1, -1):
+            msg += padnum(fabs(S + a1) - fabs(S - a1), spacer)
+        print(msg)
 
