@@ -13,6 +13,7 @@ import numpy as np, matplotlib.pyplot as plt, sys
 ####
 
 def padnum(n, w):
+    '''use spaces to left-pad a number (n) to a fixed width (w) string'''
     s = str(n)
     if len(s) > w: return -1
     else: return ' '*(w - len(s)) + s
@@ -34,13 +35,23 @@ def R_n_rough(n, x):
 
 
 def R_n(n, x):
-    '''builds and returns a random ring: all values on [-x, x], sum = 1'''
+    '''builds and returns a random n-vertex ring: all values on [-x, x], sum = 1'''
     tries = 0
     while True:
         p = [randint(-x, x) for i in range(n)]
         if sum(p) == 1: return p
         tries += 1
         if tries > 1000000: break
+    return []
+
+def R_n_S(n, x, S):
+    '''builds, returns a random n-vertex ring: all values on [-x, x], sum = S'''
+    tries = 0
+    while True:
+        p = [randint(-x, x) for i in range(n)]
+        if sum(p) == S: return p
+        tries += 1
+        if tries > 1000000: return 0
     return []
 
 def kJustify(k, n):
@@ -110,7 +121,7 @@ def IsQuiescent(R):
     return True
 
 def Q(R):
-    '''bool is R quiescent, i.e. all values non-negative? (generalized quiescence)'''
+    '''Generalized to S > 0: return bool Is R quiescent? (all values non-negative)'''
     for i in range(len(R)):
         if R[i] < 0: return False
     return True
@@ -126,7 +137,7 @@ def Entropy(R):
 
 def Entropy2(R):
     """
-    for R: Second version of entropy calculation... a bit obscure... fossil note is: E = triangle + final vertical (j = n - 1). Does s2 save the day?
+    Alternate entropy calculation: E = triangle + final vertical (j = n - 1)
     """
     n, s1, s2 = len(R), 0, 0
     for i in range(n-2):                                    
@@ -135,17 +146,16 @@ def Entropy2(R):
     for i in range(n-1): s2 += R[i]*R[j]*(j - i)*((j - i) - n) 
     return s1, s2, s1 + s2
 
+
 def RQ(R, verbose=False):
     '''for R, verbose False: resolve to Q via random choices and return fc, fs'''
     fc, fs = 0, 0                                            # reset flip count and sum
-    while not IsQuiescent(R):                                # Given R this while drives it to Q
+    while not Q(R):                                          # R -> Q flip iteration
         if verbose: print(Entropy(R), R)       
         nn, nl  = NegList(R)                                 # number and list of negative sites
-        if nn < 1: 
-            print('RQ() zero negative sites fail condition: ' + str(R))
-            
-        R, v    = Flip(R, nl[rand.randint(0, nn-1)])         # flip randomly; return 
-                                                             #   tuple = new R + 2 x abs(negative site) 
+        if nn < 1: return 0, 0                               # check error condition 
+        R, v    = Flip(R, nl[rand.randint(0, nn-1)])         # flip a randomly chosen negative-valued site 
+                                                             #   returns the resulting R and -2a, the + double flip sum 
         fc     += 1                                          # update flip count
         fs     += v                                          # update flip sum
     return fc, fs
